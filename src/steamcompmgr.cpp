@@ -86,6 +86,62 @@
 #define GPUVIS_TRACE_IMPLEMENTATION
 #include "gpuvis_trace_utils.h"
 
+
+const uint32_t WS_OVERLAPPED          		= 0x00000000u;
+const uint32_t WS_POPUP               		= 0x80000000u;
+const uint32_t WS_CHILD               		= 0x40000000u;
+const uint32_t WS_MINIMIZE            		= 0x20000000u;
+const uint32_t WS_VISIBLE             		= 0x10000000u;
+const uint32_t WS_DISABLED            		= 0x08000000u;
+const uint32_t WS_CLIPSIBLINGS        		= 0x04000000u;
+const uint32_t WS_CLIPCHILDREN        		= 0x02000000u;
+const uint32_t WS_MAXIMIZE            		= 0x01000000u;
+const uint32_t WS_BORDER              		= 0x00800000u;
+const uint32_t WS_DLGFRAME            		= 0x00400000u;
+const uint32_t WS_VSCROLL             		= 0x00200000u;
+const uint32_t WS_HSCROLL             		= 0x00100000u;
+const uint32_t WS_SYSMENU             		= 0x00080000u;
+const uint32_t WS_THICKFRAME          		= 0x00040000u;
+const uint32_t WS_GROUP               		= 0x00020000u;
+const uint32_t WS_TABSTOP             		= 0x00010000u;
+const uint32_t WS_MINIMIZEBOX         		= 0x00020000u;
+const uint32_t WS_MAXIMIZEBOX         		= 0x00010000u;
+const uint32_t WS_CAPTION             		= WS_BORDER | WS_DLGFRAME;
+const uint32_t WS_TILED               		= WS_OVERLAPPED;
+const uint32_t WS_ICONIC              		= WS_MINIMIZE;
+const uint32_t WS_SIZEBOX             		= WS_THICKFRAME;
+const uint32_t WS_OVERLAPPEDWINDOW    		= WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME| WS_MINIMIZEBOX | WS_MAXIMIZEBOX;
+const uint32_t WS_POPUPWINDOW         		= WS_POPUP | WS_BORDER | WS_SYSMENU;
+const uint32_t WS_CHILDWINDOW         		= WS_CHILD;
+const uint32_t WS_TILEDWINDOW         		= WS_OVERLAPPEDWINDOW;
+
+const uint32_t WS_EX_DLGMODALFRAME    		= 0x00000001u;
+const uint32_t WS_EX_DRAGDETECT       		= 0x00000002u; // Undocumented
+const uint32_t WS_EX_NOPARENTNOTIFY   		= 0x00000004u;
+const uint32_t WS_EX_TOPMOST          		= 0x00000008u;
+const uint32_t WS_EX_ACCEPTFILES      		= 0x00000010u;
+const uint32_t WS_EX_TRANSPARENT      		= 0x00000020u;
+const uint32_t WS_EX_MDICHILD         		= 0x00000040u;
+const uint32_t WS_EX_TOOLWINDOW       		= 0x00000080u;
+const uint32_t WS_EX_WINDOWEDGE       		= 0x00000100u;
+const uint32_t WS_EX_CLIENTEDGE       		= 0x00000200u;
+const uint32_t WS_EX_CONTEXTHELP      		= 0x00000400u;
+const uint32_t WS_EX_RIGHT            		= 0x00001000u;
+const uint32_t WS_EX_LEFT             		= 0x00000000u;
+const uint32_t WS_EX_RTLREADING       		= 0x00002000u;
+const uint32_t WS_EX_LTRREADING       		= 0x00000000u;
+const uint32_t WS_EX_LEFTSCROLLBAR    		= 0x00004000u;
+const uint32_t WS_EX_RIGHTSCROLLBAR   		= 0x00000000u;
+const uint32_t WS_EX_CONTROLPARENT    		= 0x00010000u;
+const uint32_t WS_EX_STATICEDGE       		= 0x00020000u;
+const uint32_t WS_EX_APPWINDOW        		= 0x00040000u;
+const uint32_t WS_EX_LAYERED          		= 0x00080000u;
+const uint32_t WS_EX_NOINHERITLAYOUT  		= 0x00100000u;
+const uint32_t WS_EX_NOREDIRECTIONBITMAP	= 0x00200000u;
+const uint32_t WS_EX_LAYOUTRTL        		= 0x00400000u;
+const uint32_t WS_EX_COMPOSITED       		= 0x02000000u;
+const uint32_t WS_EX_NOACTIVATE       		= 0x08000000u;
+
 template< typename T >
 constexpr const T& clamp( const T& x, const T& min, const T& max )
 {
@@ -191,6 +247,11 @@ struct win {
 	unsigned int requestedHeight;
 	bool is_dialog;
 	bool maybe_a_dropdown;
+
+	bool hasHwndStyle;
+	uint32_t hwndStyle;
+	bool hasHwndStyleEx;
+	uint32_t hwndStyleEx;
 
 	motif_hints_t *motif_hints;
 
@@ -1769,6 +1830,9 @@ paint_all()
 			return;
 	}
 
+	// Update to let the vblank manager know we are currently compositing.
+	g_bCurrentlyCompositing = bDoComposite;
+
 	if ( bDoComposite == true )
 	{
 		std::shared_ptr<CVulkanTexture> pCaptureTexture = nullptr;
@@ -2007,6 +2071,12 @@ win_skip_taskbar_and_pager( win *w )
 }
 
 static bool
+win_skip_and_not_fullscreen( win *w )
+{
+	return win_skip_taskbar_and_pager( w ) && !w->isFullscreen;
+}
+
+static bool
 win_maybe_a_dropdown( win *w )
 {
 	// Josh:
@@ -2018,6 +2088,31 @@ win_maybe_a_dropdown( win *w )
 	if ( w->appID == 230410 && w->maybe_a_dropdown && w->transientFor && ( w->skipPager || w->skipTaskbar ) )
 		return !win_is_useless( w );
 
+	// Work around Antichamber splash screen until we hook up
+	// the Proton window style deduction.
+	if ( w->appID == 219890 )
+		return false;
+
+	// The Launcher in Witcher 2 (20920) has a clear window with WS_EX_LAYERED on top of it.
+	//
+	// The Age of Empires 2 Launcher also has a WS_EX_LAYERED window to separate controls
+	// from its backing, which this seems to handle, although we seemingly don't handle
+	// it's transparency yet, which I do not understand.
+	//
+	// Layered windows are windows that are meant to be transparent
+	// with alpha blending + visual fx.
+	// https://docs.microsoft.com/en-us/windows/win32/winmsg/window-features
+	//
+	// TODO: Come back to me for original Age of Empires HD launcher.
+	// Does that use it? It wants blending!
+	// 
+	// Only do this if we have CONTROLPARENT right now. Some other apps, such as the
+	// Street Fighter V (310950) Splash Screen also use LAYERED and TOOLWINDOW, and we don't
+	// want that to be overlayed.
+	// TODO: Find more apps using LAYERED.
+	const uint32_t validLayered = WS_EX_CONTROLPARENT | WS_EX_LAYERED;
+	if ( w->hasHwndStyleEx && ( ( w->hwndStyleEx & validLayered ) == validLayered ) )
+		return true;
 
 	// Josh:
 	// The logic here is as follows. The window will be treated as a dropdown if:
@@ -2031,7 +2126,7 @@ win_maybe_a_dropdown( win *w )
 	//        ie. a settings menu dialog popup or something.
 	//      - If the window has both skip taskbar and pager, treat it as a dialog.
 	bool valid_maybe_a_dropdown =
-		w->maybe_a_dropdown && ( ( !w->is_dialog || ( !w->transientFor && win_skip_taskbar_and_pager( w ) ) ) && ( w->skipPager || w->skipTaskbar ) );
+		w->maybe_a_dropdown && ( ( !w->is_dialog || ( !w->transientFor && win_skip_and_not_fullscreen( w ) ) ) && ( w->skipPager || w->skipTaskbar ) );
 	return ( valid_maybe_a_dropdown || win_is_override_redirect( w ) ) && !win_is_useless( w );
 }
 
@@ -2068,8 +2163,8 @@ is_focus_priority_greater( win *a, win *b )
 
 	// Wine sets SKIP_TASKBAR and SKIP_PAGER hints for WS_EX_NOACTIVATE windows.
 	// See https://github.com/Plagman/gamescope/issues/87
-	if ( win_skip_taskbar_and_pager( a ) != win_skip_taskbar_and_pager( b ) )
-		return !win_skip_taskbar_and_pager( a );
+	if ( win_skip_and_not_fullscreen( a ) != win_skip_and_not_fullscreen( b ) )
+		return !win_skip_and_not_fullscreen( a );
 
 	// Prefer normal windows over dialogs
 	// if we are an override redirect/dropdown window.
@@ -2537,7 +2632,7 @@ determine_and_apply_focus()
 		// Exclude windows that are useless (1x1), skip taskbar + pager or override redirect windows
 		// from the reported focusable windows to Steam.
 		if ( win_is_useless( focusable_window ) ||
-			win_skip_taskbar_and_pager( focusable_window ) ||
+			win_skip_and_not_fullscreen( focusable_window ) ||
 			focusable_window->a.override_redirect )
 			continue;
 
@@ -3179,6 +3274,11 @@ add_win(xwayland_ctx_t *ctx, Window id, Window prev, unsigned long sequence)
 	new_win->is_dialog = false;
 	new_win->maybe_a_dropdown = false;
 	new_win->motif_hints = nullptr;
+
+	new_win->hasHwndStyle = false;
+	new_win->hwndStyle = 0;
+	new_win->hasHwndStyleEx = false;
+	new_win->hwndStyleEx = 0;
 
 	if ( steamMode == true )
 	{
@@ -3943,26 +4043,29 @@ handle_property_notify(xwayland_ctx_t *ctx, XPropertyEvent *ev)
 		if ( drm_set_color_gains( &g_DRM, gains ) )
 			hasRepaint = true;
 	}
-	if ( ev->atom == ctx->atoms.gamescopeColorMatrix )
+	for (int i = 0; i < DRM_SCREEN_TYPE_COUNT; i++)
 	{
-		std::vector< uint32_t > user_mtx;
-		bool bHasMatrix = get_prop( ctx, ctx->root, ctx->atoms.gamescopeColorMatrix, user_mtx );
-		
-		// identity
-		float mtx[9] =
+		if ( ev->atom == ctx->atoms.gamescopeColorMatrix[i] )
 		{
-			1.0f, 0.0f, 0.0f,
-			0.0f, 1.0f, 0.0f,
-			0.0f, 0.0f, 1.0f,
-		};
-		if ( bHasMatrix && user_mtx.size() == 9 )
-		{
-			for (int i = 0; i < 9; i++)
-				mtx[i] = bit_cast<float>( user_mtx[i] );
-		}
+			std::vector< uint32_t > user_mtx;
+			bool bHasMatrix = get_prop( ctx, ctx->root, ctx->atoms.gamescopeColorMatrix[i], user_mtx );
+			
+			// identity
+			float mtx[9] =
+			{
+				1.0f, 0.0f, 0.0f,
+				0.0f, 1.0f, 0.0f,
+				0.0f, 0.0f, 1.0f,
+			};
+			if ( bHasMatrix && user_mtx.size() == 9 )
+			{
+				for (int i = 0; i < 9; i++)
+					mtx[i] = bit_cast<float>( user_mtx[i] );
+			}
 
-		if ( drm_set_color_mtx( &g_DRM, mtx ) )
-			hasRepaint = true;
+			if ( drm_set_color_mtx( &g_DRM, mtx, drm_screen_type(i) ) )
+				hasRepaint = true;
+		}
 	}
 	if ( ev->atom == ctx->atoms.gamescopeColorLinearGainBlend )
 	{
@@ -3970,24 +4073,27 @@ handle_property_notify(xwayland_ctx_t *ctx, XPropertyEvent *ev)
 		if ( drm_set_color_gain_blend( &g_DRM, flBlend ) )
 			hasRepaint = true;
 	}
-	if ( ev->atom == ctx->atoms.gamescopeColorGammaExponent )
+	for (int i = 0; i < DRM_SCREEN_TYPE_COUNT; i++)
 	{
-		std::vector< uint32_t > user_vec;
-		bool bHasVec = get_prop( ctx, ctx->root, ctx->atoms.gamescopeColorGammaExponent, user_vec );
-		
-		// identity
-		float vec[6] = { 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f };
-		if ( bHasVec && user_vec.size() == 6 )
+		if ( ev->atom == ctx->atoms.gamescopeColorGammaExponent[i] )
 		{
-			for (int i = 0; i < 6; i++)
-				vec[i] = bit_cast<float>( user_vec[i] );
+			std::vector< uint32_t > user_vec;
+			bool bHasVec = get_prop( ctx, ctx->root, ctx->atoms.gamescopeColorGammaExponent[i], user_vec );
+			
+			// identity
+			float vec[6] = { 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f };
+			if ( bHasVec && user_vec.size() == 6 )
+			{
+				for (int i = 0; i < 6; i++)
+					vec[i] = bit_cast<float>( user_vec[i] );
+			}
+
+			if ( drm_set_degamma_exponent( &g_DRM, &vec[0], drm_screen_type(i) ) )
+				hasRepaint = true;
+
+			if ( drm_set_gamma_exponent( &g_DRM, &vec[3], drm_screen_type(i) ) )
+				hasRepaint = true;
 		}
-
-		if ( drm_set_degamma_exponent( &g_DRM, &vec[0] ) )
-			hasRepaint = true;
-
-		if ( drm_set_gamma_exponent( &g_DRM, &vec[3] ) )
-			hasRepaint = true;
 	}
 	if ( ev->atom == ctx->atoms.gamescopeXWaylandModeControl )
 	{
@@ -4064,6 +4170,36 @@ handle_property_notify(xwayland_ctx_t *ctx, XPropertyEvent *ev)
 	if ( ev->atom == ctx->atoms.gamescopeBlurFadeDuration )
 	{
 		g_BlurFadeDuration = get_prop( ctx, ctx->root, ctx->atoms.gamescopeBlurFadeDuration, 0 );
+	}
+	if ( ev->atom == ctx->atoms.gamescopeCompositeForce )
+	{
+		alwaysComposite = !!get_prop( ctx, ctx->root, ctx->atoms.gamescopeCompositeForce, 0 );
+		hasRepaint = true;
+	}
+	if ( ev->atom == ctx->atoms.gamescopeCompositeDebug )
+	{
+		g_bIsCompositeDebug = !!get_prop( ctx, ctx->root, ctx->atoms.gamescopeCompositeDebug, 0 );
+		hasRepaint = true;
+	}
+	if (ev->atom == ctx->atoms.wineHwndStyle)
+	{
+		win * w = find_win(ctx, ev->window);
+		if (w)
+		{
+			w->hasHwndStyle = true;
+			w->hwndStyle = get_prop(ctx, w->id, ctx->atoms.wineHwndStyle, 0);
+			focusDirty = true;
+		}
+	}
+	if (ev->atom == ctx->atoms.wineHwndStyleEx)
+	{
+		win * w = find_win(ctx, ev->window);
+		if (w)
+		{
+			w->hasHwndStyleEx = true;
+			w->hwndStyleEx = get_prop(ctx, w->id, ctx->atoms.wineHwndStyleEx, 0);
+			focusDirty = true;
+		}
 	}
 }
 
@@ -4936,10 +5072,12 @@ void init_xwayland_ctx(gamescope_xwayland_server_t *xwayland_server)
 
 	ctx->atoms.gamescopeColorLinearGain = XInternAtom( ctx->dpy, "GAMESCOPE_COLOR_LINEARGAIN", false );
 	ctx->atoms.gamescopeColorGain = XInternAtom( ctx->dpy, "GAMESCOPE_COLOR_GAIN", false );
-	ctx->atoms.gamescopeColorMatrix = XInternAtom( ctx->dpy, "GAMESCOPE_COLOR_MATRIX", false );
+	ctx->atoms.gamescopeColorMatrix[DRM_SCREEN_TYPE_INTERNAL] = XInternAtom( ctx->dpy, "GAMESCOPE_COLOR_MATRIX", false );
+	ctx->atoms.gamescopeColorMatrix[DRM_SCREEN_TYPE_EXTERNAL] = XInternAtom( ctx->dpy, "GAMESCOPE_COLOR_MATRIX_EXTERNAL", false );
 	ctx->atoms.gamescopeColorLinearGainBlend = XInternAtom( ctx->dpy, "GAMESCOPE_COLOR_LINEARGAIN_BLEND", false );
 
-	ctx->atoms.gamescopeColorGammaExponent = XInternAtom( ctx->dpy, "GAMESCOPE_COLOR_GAMMA_EXPONENT", false );
+	ctx->atoms.gamescopeColorGammaExponent[DRM_SCREEN_TYPE_INTERNAL] = XInternAtom( ctx->dpy, "GAMESCOPE_COLOR_GAMMA_EXPONENT", false );
+	ctx->atoms.gamescopeColorGammaExponent[DRM_SCREEN_TYPE_EXTERNAL] = XInternAtom( ctx->dpy, "GAMESCOPE_COLOR_GAMMA_EXPONENT_EXTERNAL", false );
 
 	ctx->atoms.gamescopeXWaylandModeControl = XInternAtom( ctx->dpy, "GAMESCOPE_XWAYLAND_MODE_CONTROL", false );
 	ctx->atoms.gamescopeFPSLimit = XInternAtom( ctx->dpy, "GAMESCOPE_FPS_LIMIT", false );
@@ -4952,6 +5090,12 @@ void init_xwayland_ctx(gamescope_xwayland_server_t *xwayland_server)
 	ctx->atoms.gamescopeBlurMode = XInternAtom( ctx->dpy, "GAMESCOPE_BLUR_MODE", false );
 	ctx->atoms.gamescopeBlurRadius = XInternAtom( ctx->dpy, "GAMESCOPE_BLUR_RADIUS", false );
 	ctx->atoms.gamescopeBlurFadeDuration = XInternAtom( ctx->dpy, "GAMESCOPE_BLUR_FADE_DURATION", false );
+
+	ctx->atoms.gamescopeCompositeForce = XInternAtom( ctx->dpy, "GAMESCOPE_COMPOSITE_FORCE", false );
+	ctx->atoms.gamescopeCompositeDebug = XInternAtom( ctx->dpy, "GAMESCOPE_COMPOSITE_DEBUG", false );
+
+	ctx->atoms.wineHwndStyle = XInternAtom( ctx->dpy, "_WINE_HWND_STYLE", false );
+	ctx->atoms.wineHwndStyleEx = XInternAtom( ctx->dpy, "_WINE_HWND_EXSTYLE", false );
 
 	ctx->root_width = DisplayWidth(ctx->dpy, ctx->scr);
 	ctx->root_height = DisplayHeight(ctx->dpy, ctx->scr);

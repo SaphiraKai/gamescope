@@ -20,7 +20,8 @@ add_project_arguments(cppc.get_supported_arguments([
   '-Wno-unused-parameter',
   '-Wno-missing-field-initializers',
   '-Wno-c99-designator',
-  '-Wno-invalid-offsetof'
+  '-Wno-invalid-offsetof',
+  '-Wno-unused-const-variable',
 ]), language: 'cpp')
 
 dep_x11 = dependency('x11')
@@ -103,7 +104,7 @@ spirv_shaders = glsl_generator.process(shader_src)
 
 liftoff_dep = dependency(
   'libliftoff',
-  version: ['>= 0.2.0', '< 0.3.0'],
+  version: ['>= 0.3.0', '< 0.4.0'],
   fallback: ['libliftoff', 'liftoff'],
   default_options: ['default_library=static'],
 )

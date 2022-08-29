@@ -197,44 +197,24 @@ static void wlserver_handle_key(struct wl_listener *listener, void *data)
 	bump_input_counter();
 }
 
-static void wlserver_movecursor( int x, int y )
-{
-	wlserver.mouse_surface_cursorx += x;
-
-	if ( wlserver.mouse_surface_cursorx > wlserver.mouse_focus_surface->current.width - 1 )
-	{
-		wlserver.mouse_surface_cursorx = wlserver.mouse_focus_surface->current.width - 1;
-	}
-
-	if ( wlserver.mouse_surface_cursorx < 0 )
-	{
-		wlserver.mouse_surface_cursorx = 0;
-	}
-
-	wlserver.mouse_surface_cursory += y;
-
-	if ( wlserver.mouse_surface_cursory > wlserver.mouse_focus_surface->current.height - 1 )
-	{
-		wlserver.mouse_surface_cursory = wlserver.mouse_focus_surface->current.height - 1;
-	}
-
-	if ( wlserver.mouse_surface_cursory < 0 )
-	{
-		wlserver.mouse_surface_cursory = 0;
-	}
-}
-
 static void wlserver_handle_pointer_motion(struct wl_listener *listener, void *data)
 {
-	struct wlserver_pointer *pointer = wl_container_of( listener, pointer, motion );
 	struct wlr_event_pointer_motion *event = (struct wlr_event_pointer_motion *) data;
 
-	if ( wlserver.mouse_focus_surface != NULL )
+	// TODO: Pick the xwayland_server with active focus
+	auto server = steamcompmgr_get_focused_server();
+	if ( server != NULL )
 	{
-		wlserver_movecursor( event->unaccel_dx, event->unaccel_dy );
+		server->ctx->accum_x += event->unaccel_dx;
+		server->ctx->accum_y += event->unaccel_dy;
 
-		wlr_seat_pointer_notify_motion( wlserver.wlr.seat, event->time_msec, wlserver.mouse_surface_cursorx, wlserver.mouse_surface_cursory );
-	}
+		float dx, dy;
+		server->ctx->accum_x = modf(server->ctx->accum_x, &dx);
+		server->ctx->accum_y = modf(server->ctx->accum_y, &dy);
+
+		XTestFakeRelativeMotionEvent( server->get_xdisplay(), int(dx), int(dy), CurrentTime );
+		XFlush( server->get_xdisplay() );
+	}	
 }
 
 static void wlserver_handle_pointer_button(struct wl_listener *listener, void *data)

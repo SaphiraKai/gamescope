@@ -62,6 +62,9 @@ struct xwayland_ctx_t
 	std::mutex listCommitsDoneLock;
 	std::vector< uint64_t > listCommitsDone;
 
+	double accum_x = 0.0;
+	double accum_y = 0.0;
+
 	struct {
 		Atom steamAtom;
 		Atom gameAtom;
@@ -123,10 +126,10 @@ struct xwayland_ctx_t
 
 		Atom gamescopeColorLinearGain;
 		Atom gamescopeColorGain;
-		Atom gamescopeColorMatrix;
+		Atom gamescopeColorMatrix[DRM_SCREEN_TYPE_COUNT];
 		Atom gamescopeColorLinearGainBlend;
 
-		Atom gamescopeColorGammaExponent;
+		Atom gamescopeColorGammaExponent[DRM_SCREEN_TYPE_COUNT];
 
 		Atom gamescopeXWaylandModeControl;
 
@@ -139,5 +142,11 @@ struct xwayland_ctx_t
 		Atom gamescopeBlurMode;
 		Atom gamescopeBlurRadius;
 		Atom gamescopeBlurFadeDuration;
+
+		Atom gamescopeCompositeForce;
+		Atom gamescopeCompositeDebug;
+
+		Atom wineHwndStyle;
+		Atom wineHwndStyleEx;
 	} atoms;
 };
